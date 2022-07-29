@@ -1,17 +1,23 @@
 output_root: '../'
-pytorch_data_dir: '/datadrive/pytorch-data/'
+pytorch_data_dir: '/home/bradneuberg/datasets/'
 experiment_name: "exp1"
-log_dir: "cocostuff27"
-azureml_logging: True
+#log_dir: "potsdam"
+#log_dir: "cocostuff27"
+log_dir: "oldclouds"
+azureml_logging: False
 submitting_to_aml: False
 
 # Loader params
-num_workers: 24
+#num_workers: 8
+num_workers: 1
 max_steps: 5000
+#max_steps: 2500
 batch_size: 16
 
 num_neighbors: 7
-dataset_name: "cocostuff27"
+#dataset_name: "potsdam"
+#dataset_name: "cocostuff27"
+dataset_name: "oldclouds"
 
 # Used if dataset_name is "directory"
 dir_dataset_name: ~
@@ -28,6 +34,7 @@ extra_clusters: 0
 use_true_labels: False
 use_recalibrator: False
 model_type: "vit_small"
+#model_type: "vit_base"
 arch: "dino"
 use_fit_model: False
 dino_feat_type: "feat"
@@ -37,6 +44,7 @@ dino_patch_size: 8
 granularity: 1
 continuous: True
 dim: 70
+#dim: 90
 dropout: True
 zero_clamp: True
 
@@ -55,21 +63,21 @@ aug_alignment_weight: 0.0
 correspondence_weight: 1.0
 
 
-# IAROA vit small 1/31/22
-neg_inter_weight: 0.63
-pos_inter_weight: 0.25
-pos_intra_weight: 0.67
-neg_inter_shift: 0.46
-pos_inter_shift: 0.12
-pos_intra_shift: 0.18
+# IARPA vit small 1/31/22
+# neg_inter_weight: 0.63
+# pos_inter_weight: 0.25
+# pos_intra_weight: 0.67
+# neg_inter_shift: 0.46
+# pos_inter_shift: 0.12
+# pos_intra_shift: 0.18
 
 # Potsdam vit small 1/31/22
-#neg_inter_weight: 0.63
-#pos_inter_weight: 0.25
-#pos_intra_weight: 0.67
-#neg_inter_shift: 0.46
-#pos_inter_shift: 0.02
-#pos_intra_shift: 0.08
+# neg_inter_weight: 0.19914806514497108
+# pos_inter_weight: 0.6098772723430869
+# pos_intra_weight: 1
+# neg_inter_shift: 0.9981259810906995
+# pos_inter_shift: 0.17863135533504992
+# pos_intra_shift: 0.003232418118101617
 
 # Cocostuff27 vit small 1/31/22
 #neg_inter_weight: 0.63
@@ -81,24 +89,22 @@ pos_intra_shift: 0.18
 
 
 ## Cocostuff27 10/3 vit_base
-
-#neg_inter_weight: 0.1538476246415498
-#pos_inter_weight: 1
-#pos_intra_weight: 0.1
-#
-#neg_inter_shift: 1
-#pos_inter_shift: 0.2
-#pos_intra_shift: 0.12
+# neg_inter_weight: 0.1538476246415498
+# pos_inter_weight: 1
+# pos_intra_weight: 0.1
+# neg_inter_shift: 1
+# pos_inter_shift: 0.2
+# pos_intra_shift: 0.12
 
 
 ## Cocostuff27 10/3 vit_small
-#neg_inter_weight: .63
-#pos_inter_weight: .25
-#pos_intra_weight: .67
-#
-#neg_inter_shift: .16
-#pos_inter_shift: .02
-#pos_intra_shift: .08
+neg_inter_weight: .63
+pos_inter_weight: .25
+pos_intra_weight: .67
+
+neg_inter_shift: .16
+pos_inter_shift: .02
+pos_intra_shift: .08
 
 
 
@@ -125,13 +131,13 @@ pos_intra_shift: 0.18
 
 # Cityscapes 10/3
 
-#neg_inter_weight: 0.9058762625226623
-#pos_inter_weight: 0.577453483136995
-#pos_intra_weight: 1
-#
-#neg_inter_shift: 0.31361241889448443
-#pos_inter_shift: 0.1754346515479633
-#pos_intra_shift: 0.45828472207
+# neg_inter_weight: 0.9058762625226623
+# pos_inter_weight: 0.577453483136995
+# pos_intra_weight: 1
+
+# neg_inter_shift: 0.31361241889448443
+# pos_inter_shift: 0.1754346515479633
+# pos_intra_shift: 0.45828472207
 
 
 # Cityscapes

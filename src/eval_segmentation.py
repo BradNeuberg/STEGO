@@ -1,6 +1,10 @@
 from modules import *
 from data import *
 from collections import defaultdict
+
+# Added by bradneuberg
+import multiprocessing as mp
+
 from multiprocessing import Pool
 import hydra
 import seaborn as sns
@@ -49,6 +53,17 @@ def _apply_crf(tup):
     return dense_crf(tup[0], tup[1])
 
 
+# Added by bradneuberg to avoid deadlocks.
+def nonbatched_crf(img_tensor, prob_tensor):
+    img = img_tensor.detach().cpu()
+    prob = prob_tensor.detach().cpu()
+    outputs = []
+    for i in range(img.shape[0]):
+        output = _apply_crf((img[i], prob[i]))
+        outputs.append(output)
+    return torch.cat([torch.from_numpy(arr).unsqueeze(0) for arr in outputs], dim=0)
+
+
 def batched_crf(pool, img_tensor, prob_tensor):
     outputs = pool.map(_apply_crf, zip(img_tensor.detach().cpu(), prob_tensor.detach().cpu()))
     return torch.cat([torch.from_numpy(arr).unsqueeze(0) for arr in outputs], dim=0)
@@ -64,12 +79,13 @@ def my_app(cfg: DictConfig) -> None:
     os.makedirs(join(result_dir, "picie"), exist_ok=True)
 
     for model_path in cfg.model_paths:
+        print("Loading {} model path...".format(model_path))
         model = LitUnsupervisedSegmenter.load_from_checkpoint(model_path)
         print(OmegaConf.to_yaml(model.cfg))
 
         run_picie = cfg.run_picie and model.cfg.dataset_name == "cocostuff27"
         if run_picie:
-            picie_state = torch.load("../saved_models/picie_and_probes.pth")
+            picie_state = torch.load("/home/bradneuberg/stego/saved_models/picie_and_probes.pth")
             picie = picie_state["model"].cuda()
             picie_cluster_probe = picie_state["cluster_probe"].module.cuda()
             picie_cluster_metrics = picie_state["cluster_metrics"]
@@ -109,6 +125,14 @@ def my_app(cfg: DictConfig) -> None:
             # all_good_images = range(80)
             # all_good_images = [ 5, 20, 56]
             all_good_images = [11, 32, 43, 52]
+        elif model.cfg.dataset_name == "potsdam":
+            # Added by bradneuberg
+            # TODO!!! Actually choose some good images.
+            all_good_images = [1, 2, 3, 4, 5]
+        elif model.cfg.dataset_name == "oldclouds":
+            # Added by bradneuberg
+            # TODO!!! Actually choose some good images.
+            all_good_images = [10, 20, 30, 40, 50, 60, 70, 80, 90]
         else:
             raise ValueError("Unknown Dataset {}".format(model.cfg.dataset_name))
         batch_nums = torch.tensor([n // (cfg.batch_size * 2) for n in all_good_images])
@@ -132,7 +156,9 @@ def my_app(cfg: DictConfig) -> None:
 
                     if cfg.run_crf:
                         linear_preds = batched_crf(pool, img, linear_probs).argmax(1).cuda()
+                        #linear_preds = nonbatched_crf(img, linear_probs).argmax(1).cuda()
                         cluster_preds = batched_crf(pool, img, cluster_probs).argmax(1).cuda()
+                        #cluster_preds = nonbatched_crf(img, cluster_probs).argmax(1).cuda()
                     else:
                         linear_preds = linear_probs.argmax(1)
                         cluster_preds = cluster_probs.argmax(1)
@@ -151,8 +177,8 @@ def my_app(cfg: DictConfig) -> None:
                             saved_data["cluster_preds"].append(cluster_preds.cpu()[offset].unsqueeze(0))
                             saved_data["label"].append(label.cpu()[offset].unsqueeze(0))
                             saved_data["img"].append(img.cpu()[offset].unsqueeze(0))
-                            if run_picie:
-                                saved_data["picie_preds"].append(picie_preds.cpu()[offset].unsqueeze(0))
+                            #if run_picie:
+                            #    saved_data["picie_preds"].append(picie_preds.cpu()[offset].unsqueeze(0))
         saved_data = {k: torch.cat(v, dim=0) for k, v in saved_data.items()}
 
         tb_metrics = {
@@ -211,9 +237,13 @@ def my_app(cfg: DictConfig) -> None:
 
         plot_cm(model.test_cluster_metrics.histogram, model.label_cmap, model.cfg)
         plt.show()
+        # Added by bradneuberg
+        plt.savefig("plot.png")
         plt.clf()
 
 
 if __name__ == "__main__":
+    # Added by bradneuberg
+    mp.set_start_method("spawn")
     prep_args()
     my_app()

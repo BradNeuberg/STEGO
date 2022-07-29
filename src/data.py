@@ -1,3 +1,4 @@
+from glob import glob
 import os
 import random
 from os.path import join
@@ -5,7 +6,9 @@ from os.path import join
 import numpy as np
 import torch.multiprocessing
 from PIL import Image
+import rasterio as rio
 from scipy.io import loadmat
+from skimage import exposure
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
 from torchvision.datasets.cityscapes import Cityscapes
@@ -69,6 +72,25 @@ def create_cityscapes_colormap():
               (0, 0, 230),
               (119, 11, 32),
               (0, 0, 0)]
+    return np.array(colors)
+
+
+# Added by bradneuberg
+def create_potsdam_colormap():
+    colors = [(255, 0, 0),
+              (0, 255, 0),
+              (0, 0, 255)]
+    return np.array(colors)
+
+
+# Added by bradneuberg
+def create_oldclouds_colormap():
+    colors = [(0, 0, 0),        # clear (black)
+              (204, 204, 255),  # snow (blueberry)
+              (64, 64, 64),     # shadow (gray)
+              (255, 229, 204),  # haze_light (tan)
+              (255, 255, 204),  # haze_heavy (light yellow)
+              (255, 255, 255)]  # cloud (white)
     return np.array(colors)
 
 
@@ -211,6 +233,7 @@ class PotsdamRaw(Dataset):
         seed = np.random.randint(2147483647)
         random.seed(seed)
         torch.manual_seed(seed)
+        orig_img = img
         img = self.transform(img)
 
         random.seed(seed)
@@ -223,7 +246,7 @@ class PotsdamRaw(Dataset):
             label = new_label_map
 
         mask = (label > 0).to(torch.float32)
-        return img, label, mask
+        return img, label, mask, orig_img
 
     def __len__(self):
         return len(self.files)
@@ -378,7 +401,8 @@ class CroppedDataset(Dataset):
         self.img_dir = join(self.root, "img", self.split)
         self.label_dir = join(self.root, "label", self.split)
         self.num_images = len(os.listdir(self.img_dir))
-        assert self.num_images == len(os.listdir(self.label_dir))
+        # Note: we are assuming there are preview images here, so dividing by two.
+        assert self.num_images == len(os.listdir(self.label_dir))/2
 
     def __getitem__(self, index):
         image = Image.open(join(self.img_dir, "{}.jpg".format(index))).convert('RGB')
@@ -452,6 +476,16 @@ class ContrastiveSegDataset(Dataset):
             self.n_classes = 3
             dataset_class = PotsdamRaw
             extra_args = dict(coarse_labels=True)
+        elif dataset_name == "oldclouds" and crop_type is not None:
+            print("Note: Using cropped oldclouds dataset")
+            self.n_classes = 6
+            dataset_class = CroppedDataset
+            extra_args = dict(dataset_name="oldclouds", crop_type=cfg.crop_type, crop_ratio=cfg.crop_ratio)
+        elif dataset_name == "oldclouds" and crop_type is None:
+            print("Note: Using uncropped oldclouds dataset")
+            self.n_classes = 6
+            dataset_class = OldClouds
+            extra_args = dict()
         elif dataset_name == "directory":
             self.n_classes = cfg.dir_dataset_n_classes
             dataset_class = DirectoryDataset
@@ -563,3 +597,228 @@ class ContrastiveSegDataset(Dataset):
             ret["coord_aug"] = coord_aug.permute(1, 2, 0)
 
         return ret
+
+
+class OldClouds(Dataset):
+    """
+    PyTorch dataset focused on serving up the older, UDM2 Planet cloud
+    dataset during STEGO training.
+
+    Before using:
+    conda activate stego
+    pip3 install rasterio
+    """
+
+    def __init__(self, root, image_set, transform, target_transform,
+                 bit_depth=8, drop_nir=True):
+        self.split = image_set
+        self.root = join(root, "cloud_data_combined_448x448")
+        self.transform = transform
+        self.label_transform = target_transform
+        self.bit_depth = bit_depth
+        self.drop_nir = drop_nir
+
+        print("OldClouds, bit_depth={}, drop_nir={}".format(
+            bit_depth, drop_nir))
+
+        assert self.split in ["train", "val", "train+val"]
+        split_dirs = {
+            "train": ["training"],
+            "val": ["validation"],
+            "train+val": ["training", "validation"]
+        }
+
+        self.image_files = []
+        self.label_files = []
+        for split_dir in split_dirs[self.split]:
+            path = join(self.root, split_dir)
+            self.image_files.extend(glob(join(path, "images", "*.tif")))
+
+        for path in self.image_files:
+            path = path.replace("images", "labels")
+            path = path.replace("__X", "__y")
+            path = path.replace(".toar", "")
+            self.label_files.append(path)
+
+        assert len(self.image_files) == len(self.label_files), \
+            "len(images_files)[{}] !- len(label_files)[{}]".format(
+                len(self.image_files), len(self.label_files))
+
+    def __getitem__(self, index):
+        # Handle the main image.
+        image_path = self.image_files[index]
+        with rio.open(image_path, "r") as f:
+            data = f.read()
+            if self.drop_nir:
+                data = data[:3]
+
+            # Convert from BGR -> RGB order.
+            rgb = (2,1,0) # BGR ordering.
+            data = data[rgb, :, :]
+
+            # We are natively at 16 bits; convert to an 8-bit representation
+            # if asked for.
+            if self.bit_depth == 8:
+                data = self.__stretch_im__(data, str_clip=2)
+                data = self.__bytescale__(data)
+
+            # At this point, 'data' is in C, H, W ordering.
+            mode = None
+            if self.bit_depth == 16:
+                mode = "I;16"
+            elif self.bit_depth == 8:
+                mode = "RGB"
+
+            # (C,H,W) -> (H,W,C)
+            data = np.moveaxis(data, 0, -1)
+            img = to_pil_image(data, mode=mode)
+
+        seed = np.random.randint(2147483647)
+        random.seed(seed)
+        torch.manual_seed(seed)
+        img = self.transform(img)
+
+        # Handle its label if one is present.
+        if self.label_files is not None:
+            label_path = self.label_files[index]
+
+            with rio.open(label_path, "r") as f:
+                data = f.read()
+
+                # Our labels are in C, H, W format, with 6 channels:
+                # clear: 0
+                # snow: 1
+                # shadow: 2
+                # haze_light: 3
+                # haze_heavy: 4
+                # cloud: 5
+                # We need to collapse these into a single label channel
+                # with these class numbers.
+                label = np.zeros((data.shape[1], data.shape[2]), dtype=np.uint8)
+                for c in range(data.shape[0]):
+                    view = data[c]
+                    label[view == 255] = c
+
+                label = to_pil_image(label)
+
+            random.seed(seed)
+            torch.manual_seed(seed)
+            label = self.label_transform(label).squeeze(0)
+        else:
+            label = torch.zeros(img.shape[1], img.shape[2], dtype=torch.int64) - 1
+
+        mask = (label > 0).to(torch.float32)
+        return img, label, mask
+
+    def __len__(self):
+        return len(self.image_files)
+
+    # Taken from earthpy: https://earthpy.readthedocs.io/en/latest/_modules/earthpy/plot.html
+    # Under BSD3 license: https://github.com/earthlab/earthpy/blob/main/LICENSE
+    def __stretch_im__(self, arr, str_clip):
+        """Stretch an image in numpy ndarray format using a specified clip value.
+
+        Parameters
+        ----------
+        arr: numpy array
+            N-dimensional array in rasterio band order (bands, rows, columns)
+        str_clip: int
+            The % of clip to apply to the stretch. Default = 2 (2 and 98)
+
+        Returns
+        ----------
+        arr: numpy array with values stretched to the specified clip %
+
+        """
+        s_min = str_clip
+        s_max = 100 - str_clip
+        arr_rescaled = np.zeros_like(arr)
+        for ii, band in enumerate(arr):
+            lower, upper = np.nanpercentile(band, (s_min, s_max))
+            arr_rescaled[ii] = exposure.rescale_intensity(
+                band, in_range=(lower, upper)
+            )
+        return arr_rescaled.copy()
+
+    # From earthpy.spatial: https://earthpy.readthedocs.io/en/latest/_modules/earthpy/spatial.html#bytescale
+    # Under BSD3 license: https://github.com/earthlab/earthpy/blob/main/LICENSE
+    def __bytescale__(self, data, high=255, low=0, cmin=None, cmax=None):
+        """Byte scales an array (image).
+
+        Byte scaling converts the input image to uint8 dtype, and rescales
+        the data range to ``(low, high)`` (default 0-255).
+        If the input image already has dtype uint8, no scaling is done.
+        Source code adapted from scipy.misc.bytescale (deprecated in scipy-1.0.0)
+
+        Parameters
+        ----------
+        data : numpy array
+            image data array.
+        high : int (default=255)
+            Scale max value to `high`.
+        low : int (default=0)
+            Scale min value to `low`.
+        cmin : int (optional)
+            Bias scaling of small values. Default is ``data.min()``.
+        cmax : int (optional)
+            Bias scaling of large values. Default is ``data.max()``.
+
+        Returns
+        -------
+        img_array : uint8 numpy array
+            The byte-scaled array.
+
+        Examples
+        --------
+            >>> import numpy as np
+            >>> from earthpy.spatial import bytescale
+            >>> img = np.array([[ 91.06794177,   3.39058326,  84.4221549 ],
+            ...                 [ 73.88003259,  80.91433048,   4.88878881],
+            ...                 [ 51.53875334,  34.45808177,  27.5873488 ]])
+            >>> bytescale(img)
+            array([[255,   0, 236],
+                   [205, 225,   4],
+                   [140,  90,  70]], dtype=uint8)
+            >>> bytescale(img, high=200, low=100)
+            array([[200, 100, 192],
+                   [180, 188, 102],
+                   [155, 135, 128]], dtype=uint8)
+            >>> bytescale(img, cmin=0, cmax=255)
+            array([[255,   0, 236],
+                   [205, 225,   4],
+                   [140,  90,  70]], dtype=uint8)
+        """
+        if data.dtype == "uint8":
+            return data
+
+        if high > 255:
+            raise ValueError("`high` should be less than or equal to 255.")
+        if low < 0:
+            raise ValueError("`low` should be greater than or equal to 0.")
+        if high < low:
+            raise ValueError("`high` should be greater than or equal to `low`.")
+
+        if cmin is None or (cmin < data.min()):
+            cmin = float(data.min())
+
+        if (cmax is None) or (cmax > data.max()):
+            cmax = float(data.max())
+
+        # Calculate range of values
+        crange = cmax - cmin
+        if crange < 0:
+            raise ValueError("`cmax` should be larger than `cmin`.")
+        elif crange == 0:
+            raise ValueError(
+                "`cmax` and `cmin` should not be the same value. Please specify "
+                "`cmax` > `cmin`"
+            )
+
+        scale = float(high - low) / crange
+
+        # If cmax is less than the data max, then this scale parameter will create
+        # data > 1.0. clip the data to cmax first.
+        data[data > cmax] = cmax
+        bytedata = (data - cmin) * scale + low
+        return (bytedata.clip(low, high) + 0.5).astype("uint8")
+

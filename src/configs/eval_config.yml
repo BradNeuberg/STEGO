@@ -1,19 +1,22 @@
-output_root: '../'
-pytorch_data_dir: '/datadrive/pytorch-data/'
-experiment_name: "cocostuff"
+output_root: '/home/bradneuberg/eval/'
+pytorch_data_dir: '/home/bradneuberg/datasets'
+#experiment_name: "potsdam"
+#experiment_name: "cocostuff"
+experiment_name: "oldclouds"
 res: 320
 batch_size: 8
-num_workers: 24
-run_picie: True
+num_workers: 3
+run_picie: False
 run_crf: True
 run_prediction: True
 dark_mode: True
 use_ddp: False
 
 model_paths:
-  - "../saved_models/cocostuff27_vit_base_5.ckpt"
+  #- "/home/bradneuberg/stego/saved_models/cocostuff27_vit_base_5.ckpt"
+  #- "/home/bradneuberg/stego/checkpoints/cocostuff27/cocostuff27_exp1_date_Jul16_17-44-47/epoch=0-step=3199.ckpt"
   #- "../saved_models/cityscapes_vit_base_1.ckpt"
-  #- "../saved_models/potsdam_test.ckpt"
+  - "/home/bradneuberg/stego/checkpoints/oldclouds/oldclouds_exp1_date_Jul28_22-07-43/epoch=0-step=4399.ckpt"
 
 hydra:
   run:

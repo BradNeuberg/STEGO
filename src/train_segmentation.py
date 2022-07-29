@@ -14,6 +14,7 @@ import torch.multiprocessing
 import seaborn as sns
 from pytorch_lightning.callbacks import ModelCheckpoint
 import sys
+#import sigopt
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -41,11 +42,15 @@ def get_class_labels(dataset_name):
             'bus', 'car', 'cat', 'chair', 'cow',
             'diningtable', 'dog', 'horse', 'motorbike', 'person',
             'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
-    elif dataset_name == "potsdam":
+    elif dataset_name == "potsdam" or dataset_name == "potsdamraw":
         return [
             'roads and cars',
             'buildings and clutter',
             'trees and vegetation']
+    elif dataset_name == "oldclouds":
+        return [
+            "clear", "snow", "shadow", "haze_light", "haze_heavy", "cloud",
+        ]
     else:
         raise ValueError("Unknown Dataset {}".format(dataset_name))
 
@@ -79,6 +84,7 @@ class LitUnsupervisedSegmenter(pl.LightningModule):
 
         self.cluster_metrics = UnsupervisedMetrics(
             "test/cluster/", n_classes, cfg.extra_clusters, True)
+        self.recent_cluster_miou = 0
         self.linear_metrics = UnsupervisedMetrics(
             "test/linear/", n_classes, 0, False)
 
@@ -99,6 +105,10 @@ class LitUnsupervisedSegmenter(pl.LightningModule):
 
         if self.cfg.dataset_name.startswith("cityscapes"):
             self.label_cmap = create_cityscapes_colormap()
+        elif self.cfg.dataset_name.startswith("potsdam"):
+            self.label_cmap = create_potsdam_colormap()
+        elif self.cfg.dataset_name.startswith("oldclouds"):
+            self.label_cmap = create_oldclouds_colormap()
         else:
             self.label_cmap = create_pascal_label_colormap()
 
@@ -282,6 +292,8 @@ class LitUnsupervisedSegmenter(pl.LightningModule):
                 **self.cluster_metrics.compute(),
             }
 
+            self.recent_cluster_miou = tb_metrics["test/cluster/mIoU"]
+
             if self.trainer.is_global_zero and not self.cfg.submitting_to_aml:
                 #output_num = 0
                 output_num = random.randint(0, len(outputs) -1)
@@ -385,6 +397,14 @@ class LitUnsupervisedSegmenter(pl.LightningModule):
 
 @hydra.main(config_path="configs", config_name="train_config.yml")
 def my_app(cfg: DictConfig) -> None:
+    #sigopt.log_dataset("Potsdam")
+    #sigopt.params.setdefault("neg_inter_weight", 0.63)
+    #sigopt.params.setdefault("pos_inter_weight", 0.25)
+    #sigopt.params.setdefault("pos_intra_weight", 0.67)
+    #sigopt.params.setdefault("neg_inter_shift", 0.46)
+    #sigopt.params.setdefault("pos_inter_shift", 0.08)
+    #sigopt.params.setdefault("pos_intra_shift", 0.02)
+    
     OmegaConf.set_struct(cfg, False)
     print(OmegaConf.to_yaml(cfg))
     pytorch_data_dir = cfg.pytorch_data_dir
@@ -399,6 +419,19 @@ def my_app(cfg: DictConfig) -> None:
     os.makedirs(data_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
+
+    #cfg.neg_inter_weight = sigopt.params.neg_inter_weight
+    #print("Sigopt neg_inter_weight: {}".format(cfg.neg_inter_weight))
+    #cfg.pos_inter_weight = sigopt.params.pos_inter_weight
+    #print("Sigopt pos_inter_weight: {}".format(cfg.pos_inter_weight))
+    #cfg.pos_intra_weight = sigopt.params.pos_intra_weight
+    #print("Sigopt pos_intra_weight: {}".format(cfg.pos_intra_weight))
+    #cfg.neg_inter_shift = sigopt.params.neg_inter_shift
+    #print("Sigopt neg_inter_shift: {}".format(cfg.neg_inter_shift))
+    #cfg.pos_inter_shift = sigopt.params.pos_inter_shift
+    #print("Sigopt pos_inter_shift: {}".format(cfg.pos_inter_shift))
+    #cfg.pos_intra_shift = sigopt.params.pos_intra_shift
+    #print("Sigopt pos_intra_shift: {}".format(cfg.pos_intra_shift))
 
     seed_everything(seed=0)
 
@@ -496,7 +529,12 @@ def my_app(cfg: DictConfig) -> None:
     )
     trainer.fit(model, train_loader, val_loader)
 
+    print("At end of training, recent cluster mIou: {}".format(model.recent_cluster_miou))
+    #sigopt.log_metric("cluster_miou", model.recent_cluster_miou)
+
 
 if __name__ == "__main__":
+    import multiprocessing as mp
+    mp.set_start_method("spawn")
     prep_args()
     my_app()

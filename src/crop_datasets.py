@@ -1,3 +1,4 @@
+from data import *
 from modules import *
 import os
 from data import ContrastiveSegDataset
@@ -6,7 +7,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.utilities.seed import seed_everything
 from torch.utils.data import DataLoader
-from torchvision.transforms.functional import five_crop, _get_image_size, crop
+from torchvision.transforms.functional import five_crop, _get_image_size, crop, to_pil_image
 from tqdm import tqdm
 from torch.utils.data import Dataset
 
@@ -73,7 +74,7 @@ class RandomCropComputer(Dataset):
     def five_crops(self, i, img):
         return five_crop(img, self._get_size(img))
 
-    def __init__(self, cfg, dataset_name, img_set, crop_type, crop_ratio):
+    def __init__(self, cfg, dataset_name, img_set, crop_type, crop_ratio, create_label_preview):
         self.pytorch_data_dir = cfg.pytorch_data_dir
         self.crop_ratio = crop_ratio
         self.save_dir = join(
@@ -81,11 +82,16 @@ class RandomCropComputer(Dataset):
         self.img_set = img_set
         self.dataset_name = dataset_name
         self.cfg = cfg
+        self.create_label_preview = create_label_preview
 
         self.img_dir = join(self.save_dir, "img", img_set)
         self.label_dir = join(self.save_dir, "label", img_set)
         os.makedirs(self.img_dir, exist_ok=True)
         os.makedirs(self.label_dir, exist_ok=True)
+
+        self.label_cmap = None
+        if dataset_name == "oldclouds":
+            self.label_cmap = create_oldclouds_colormap()
 
         if crop_type == "random":
             cropper = lambda i, x: self.random_crops(i, x)
@@ -121,6 +127,21 @@ class RandomCropComputer(Dataset):
             label_arr = (label + 1).unsqueeze(0).permute(1, 2, 0).to('cpu', torch.uint8).numpy().squeeze(-1)
             Image.fromarray(img_arr).save(join(self.img_dir, "{}.jpg".format(img_num)), 'JPEG')
             Image.fromarray(label_arr).save(join(self.label_dir, "{}.png".format(img_num)), 'PNG')
+
+            if self.dataset_name == "oldclouds":
+                if (label_arr.max()-1) >= 6:
+                    print(f"Invalid label class count for item {item}, max: {label_arr.max()}")
+
+            if self.create_label_preview:
+                # Convert this to a "nice" image with an actual color
+                # per class.
+                preview_label = np.zeros((3, label_arr.shape[0], label_arr.shape[1]),
+                                         dtype=np.uint8)
+                preview_label = self.label_cmap[label_arr-1].astype(np.uint8)
+                preview_label = to_pil_image(preview_label)
+                preview_filename = join(self.label_dir, "{}_preview.png".format(img_num))
+                preview_label.save(preview_filename, "PNG")
+
         return True
 
     def __len__(self):
@@ -137,7 +158,9 @@ def my_app(cfg: DictConfig) -> None:
     # crop_types = ["five","random"]
     # crop_ratios = [.5, .7]
 
-    dataset_names = ["cityscapes"]
+    #dataset_names = ["potsdam"]
+    #dataset_names = ["cocostuff27"]
+    dataset_names = ["oldclouds"]
     img_sets = ["train", "val"]
     crop_types = ["five"]
     crop_ratios = [.5]
@@ -146,7 +169,8 @@ def my_app(cfg: DictConfig) -> None:
         for crop_type in crop_types:
             for dataset_name in dataset_names:
                 for img_set in img_sets:
-                    dataset = RandomCropComputer(cfg, dataset_name, img_set, crop_type, crop_ratio)
+                    dataset = RandomCropComputer(cfg, dataset_name, img_set, crop_type, crop_ratio,
+                                                 create_label_preview=True)
                     loader = DataLoader(dataset, 1, shuffle=False, num_workers=cfg.num_workers, collate_fn=lambda l: l)
                     for _ in tqdm(loader):
                         pass

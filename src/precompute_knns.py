@@ -37,8 +37,10 @@ def my_app(cfg: DictConfig) -> None:
     print(cfg.output_root)
 
     image_sets = ["val", "train"]
-    dataset_names = ["cocostuff27", "cityscapes", "potsdam"]
-    crop_types = ["five", None]
+    #dataset_names = ["potsdam", "potsdamraw"]
+    #dataset_names = ["cocostuff27"]
+    dataset_names = ["oldclouds"]
+    crop_types = ["five"]
 
     # Uncomment these lines to run on custom datasets
     #dataset_names = ["directory"]
@@ -46,6 +48,7 @@ def my_app(cfg: DictConfig) -> None:
 
     res = 224
     n_batches = 16
+    #n_batches = 256
 
     if cfg.arch == "dino":
         from modules import DinoFeaturizer, LambdaLayer
@@ -78,7 +81,8 @@ def my_app(cfg: DictConfig) -> None:
                         cfg=cfg,
                     )
 
-                    loader = DataLoader(dataset, 256, shuffle=False, num_workers=cfg.num_workers, pin_memory=False)
+                    loader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=False,
+                                        num_workers=cfg.num_workers, pin_memory=False)
 
                     with torch.no_grad():
                         normed_feats = get_feats(par_model, loader)
@@ -98,5 +102,7 @@ def my_app(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
+    #import multiprocessing as mp
+    #mp.set_start_method("spawn")
     prep_args()
     my_app()
